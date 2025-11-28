@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FlexVault Technical Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Poppins:wght@600&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --bg: #F6F4D2;
+        --card: #FFFFFF;
+        --primary: #F19C79;
+        --accent: #CBDFBD;
+        --text: #222;
+      }
+      body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; }
+      header { padding: 24px; background: linear-gradient(90deg, var(--accent), #F6F4D2, var(--primary)); }
+      header h1 { margin: 0; font-family: Poppins, Inter, sans-serif; font-weight: 600; }
+      .container { max-width: 1040px; margin: 24px auto; padding: 0 16px; }
+      .card { background: var(--card); border-radius: 16px; padding: 20px; margin-bottom: 20px; border: 1px solid #E5E7EB; box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
+      .diagram { background: var(--card); border-radius: 12px; padding: 16px; margin: 12px 0; border: 1px solid #E5E7EB; box-shadow: 0 4px 14px rgba(0,0,0,0.06); }
+      code, pre { background: #FBFBFB; border: 1px solid #EEE; border-radius: 6px; padding: 2px 6px; }
+      h2 { margin-top: 0; }
+      .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+      @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({ startOnLoad: true, theme: 'default' });</script>
+  </head>
+  <body>
+    <header>
+      <div class="container">
+        <h1>FlexVault Technical Report</h1>
+        <p>A secure, intelligent, serverless AWS-powered cloud storage platform.</p>
+      </div>
+    </header>
+    <main class="container">
+      <section class="card">
+        <h2>Architecture Overview</h2>
+        <p>Serverless components: Cognito, API Gateway, Lambda, S3, DynamoDB, SQS, IAM. S3 events trigger metadata processing, SQS drives batch ML inference.</p>
+        <div class="diagram">
+          <pre class="mermaid">
+graph LR
+  A[Cognito User Pool] --- B(API Gateway)
+  B --> C[Lambda Auth Handlers]
+  B --> D[Lambda presign Upload]
+  B --> E[Lambda presign Download]
+  D --> F[S3 Bucket]
+  F -- ObjectCreated --> G[Lambda metadataCallback]
+  G --> H[DynamoDB Files]
+  G --> I[SQS Jobs]
+  I --> J[Lambda batchInference]
+  J --> H
+          </pre>
+        </div>
+        <p>Tables: <code>flexvault-files</code>, <code>flexvault-folders</code>, <code>flexvault-uploads</code>, <code>flexvault-jobs</code>. GSIs enable folder, user, and tag queries.</p>
+      </section>
+
+      <section class="card">
+        <h2>ML Integration</h2>
+        <div class="grid">
+          <div>
+            <h3>Data Sources</h3>
+            <ul>
+              <li>Client-side labels and OCR via ML Kit.</li>
+              <li>S3-triggered enrichment pipeline with SQS.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Inference Flow</h3>
+            <div class="diagram">
+              <pre class="mermaid">
+sequenceDiagram
+  participant S3
+  participant Lambda as metadataCallback
+  participant SQS
+  participant Worker as batchInference
+  participant DDB
+  S3-->>Lambda: ObjectCreated
+  Lambda->>DDB: status=READY
+  Lambda->>SQS: enqueue {key,userId}
+  Worker->>SQS: consume
+  Worker->>DDB: append tags, embeddingId
+              </pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Security</h2>
+        <ul>
+          <li>JWT-based authorization via Cognito.</li>
+          <li>HTTPS for API Gateway and presigned S3 operations.</li>
+          <li>IAM role grants scoped to tables, bucket, and queue.</li>
+          <li>Recommendation: enable S3 SSE-KMS and fine-grained IAM least privilege.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>UI/UX Highlights</h2>
+        <ul>
+          <li>Branding colors and gradients defined in <code>lib/core/constants/flexvault_colors.dart</code>.</li>
+          <li>Light/Dark themes in <code>lib/core/theme/flexvault_theme.dart</code>.</li>
+          <li>Navigation with <code>go_router</code> in <code>lib/core/routes/app_router.dart</code>.</li>
+          <li>Upload Manager and Smart Folders screens provide user feedback and actions.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>APIs</h2>
+        <p>Endpoints: <code>/auth/*</code>, <code>/me</code>, <code>/upload/presign</code>, <code>/download/presign</code>. See <code>docs/api.md</code> and <code>docs/openapi.yaml</code>.</p>
+      </section>
+
+      <section class="card">
+        <h2>Quality Assurance</h2>
+        <p>Initial guidance on security validation, ML testing, search validation, and cross-browser coverage in <code>docs/qa.md</code>.</p>
+      </section>
+
+      <section class="card">
+        <h2>Export</h2>
+        <p>Use the PowerShell script <code>docs/generate-pdf.ps1</code> to export this report to PDF.</p>
+      </section>
+    </main>
+  </body>
+</html>
+

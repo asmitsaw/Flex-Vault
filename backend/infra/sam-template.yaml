@@ -1,0 +1,238 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: FlexVault Backend Infrastructure
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name
+  GoogleClientId:
+    Type: String
+    Default: your-google-client-id
+    Description: Google OAuth client ID used for sign-in
+  GoogleAuthSecret:
+    Type: String
+    NoEcho: true
+    Description: Secret used to derive Cognito passwords for Google identities
+
+Resources:
+  # Cognito User Pool
+  FlexVaultUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'flexvault-users-${Environment}'
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  FlexVaultUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref FlexVaultUserPool
+      ClientName: flexvault-mobile-client
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - USER_PASSWORD_AUTH
+        - USER_SRP_AUTH
+      RefreshTokenValidity: 30
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+
+  # S3 Bucket
+  FlexVaultBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'flexvault-files-${AWS::AccountId}-${AWS::Region}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteTempUploads
+            Prefix: temp/
+            ExpirationInDays: 1
+
+  # DynamoDB Tables
+  FilesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'flexvault-files-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: folderId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: tag
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: folderId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI3
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: tag
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  UploadsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'flexvault-uploads-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: uploadId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: uploadId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # SQS Queue
+  JobsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'flexvault-jobs-${Environment}'
+      VisibilityTimeoutSeconds: 300
+      MessageRetentionPeriod: 1209600
+
+  # Lambda Functions
+  AuthSignupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'flexvault-auth-signup-${Environment}'
+      CodeUri: ../dist
+      Handler: signup.handler
+      Runtime: nodejs20.x
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          COGNITO_USER_POOL_ID: !Ref FlexVaultUserPool
+          COGNITO_CLIENT_ID: !Ref FlexVaultUserPoolClient
+      Policies:
+        - CognitoPowerUserPolicy:
+            UserPoolId: !Ref FlexVaultUserPool
+
+  AuthLoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'flexvault-auth-login-${Environment}'
+      CodeUri: ../dist
+      Handler: login.handler
+      Runtime: nodejs20.x
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          COGNITO_USER_POOL_ID: !Ref FlexVaultUserPool
+          COGNITO_CLIENT_ID: !Ref FlexVaultUserPoolClient
+      Policies:
+        - CognitoPowerUserPolicy:
+            UserPoolId: !Ref FlexVaultUserPool
+
+  AuthGoogleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'flexvault-auth-google-${Environment}'
+      CodeUri: ../dist
+      Handler: googleSignIn.handler
+      Runtime: nodejs20.x
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          COGNITO_USER_POOL_ID: !Ref FlexVaultUserPool
+          COGNITO_CLIENT_ID: !Ref FlexVaultUserPoolClient
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+          GOOGLE_AUTH_SECRET: !Ref GoogleAuthSecret
+      Policies:
+        - CognitoPowerUserPolicy:
+            UserPoolId: !Ref FlexVaultUserPool
+
+  # API Gateway
+  FlexVaultApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Sub '${Environment}'
+      Cors:
+        AllowMethods: "'*'"
+        AllowHeaders: "'*'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt FlexVaultUserPool.Arn
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: FlexVault API
+        paths:
+          /auth/signup:
+            post:
+              x-amazon-apigateway-integration:
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthSignupFunction.Arn}/invocations'
+                httpMethod: POST
+                type: aws_proxy
+              x-amazon-apigateway-authorizer: null
+          /auth/login:
+            post:
+              x-amazon-apigateway-integration:
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthLoginFunction.Arn}/invocations'
+                httpMethod: POST
+                type: aws_proxy
+              x-amazon-apigateway-authorizer: null
+          /auth/google:
+            post:
+              x-amazon-apigateway-integration:
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthGoogleFunction.Arn}/invocations'
+                httpMethod: POST
+                type: aws_proxy
+              x-amazon-apigateway-authorizer: null
+
+Outputs:
+  UserPoolId:
+    Value: !Ref FlexVaultUserPool
+  UserPoolClientId:
+    Value: !Ref FlexVaultUserPoolClient
+  ApiUrl:
+    Value: !Sub 'https://${FlexVaultApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+
+
