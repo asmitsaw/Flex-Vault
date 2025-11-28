@@ -1,7 +1,6 @@
 # Flex-Vault
 
-![Flutter](https://img.shields.io/badge/Flutter-3.24+-blue? logo=flutter)
-![Dart](https://img.shields.io/badge/Dart-3. 5+-0175C2?logo=dart)
+Flutter (3.24+) and Dart (3.5+) badges.
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **A warm, minimal AI-first cloud storage experience** — Flex-Vault combines a cross-platform Flutter mobile client with a production-ready AWS backend for intelligent file management. 
